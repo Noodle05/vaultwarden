@@ -144,6 +144,8 @@ Models use an async `save(&self, conn) -> EmptyResult` pattern that internally s
 - Each connection gets a `tokio::sync::mpsc::channel(100)` for message delivery
 - Keep-alive: 15s ping interval
 
+**HA WebSocket**: See [docs/ha-websocket-design.md](docs/ha-websocket-design.md) for the multi-pod notification design (sidecar + PostgreSQL triggers + internal REST API). Not yet implemented.
+
 ## Potential Pitfalls
 
 - **Build requires at least one DB feature**: `--features sqlite` (or mysql/postgresql)
