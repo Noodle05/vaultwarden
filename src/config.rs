@@ -527,6 +527,12 @@ make_config! {
         /// Enable websocket notifications
         enable_websocket:       bool,   false,  def,    true;
     },
+    internal_notify {
+        /// Enable internal notify endpoint for HA multi-pod deployment.
+        /// Listens on localhost only — used by a sidecar to replay WS
+        /// notifications when database changes are detected via pg_notify.
+        internal_notify_enabled: bool, false,  def,    false;
+    },
     push {
         /// Enable push notifications
         push_enabled:           bool,   false,  def,    false;
