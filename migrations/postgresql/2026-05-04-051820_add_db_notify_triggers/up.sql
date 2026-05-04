@@ -6,6 +6,13 @@
 -- to avoid PL/pgSQL compile-time column resolution. Since this function
 -- handles 10 different tables with different schemas, static column
 -- references would fail on tables missing those columns.
+--
+-- Performance: pg_notify() is async (writes to a lock-free queue, returns
+-- immediately). to_jsonb() + jsonb_build_object() add CPU overhead per row,
+-- but payloads stay well under the 8000-byte NOTIFY limit since only key
+-- columns are included (large columns like ciphers.data are never accessed).
+-- No additional queries are performed inside the trigger — all work is done
+-- on the NEW/OLD row already in memory.
 CREATE OR REPLACE FUNCTION notify_table_change()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -94,15 +101,15 @@ CREATE TRIGGER ciphers_notify
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 CREATE TRIGGER attachments_notify
-    AFTER INSERT OR DELETE ON attachments
+    AFTER INSERT OR UPDATE OR DELETE ON attachments
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 CREATE TRIGGER ciphers_collections_notify
-    AFTER INSERT OR DELETE ON ciphers_collections
+    AFTER INSERT OR UPDATE OR DELETE ON ciphers_collections
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 CREATE TRIGGER folders_ciphers_notify
-    AFTER INSERT OR DELETE ON folders_ciphers
+    AFTER INSERT OR UPDATE OR DELETE ON folders_ciphers
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 CREATE TRIGGER folders_notify
@@ -114,7 +121,7 @@ CREATE TRIGGER sends_notify
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 CREATE TRIGGER archives_notify
-    AFTER INSERT OR DELETE ON archives
+    AFTER INSERT OR UPDATE OR DELETE ON archives
     FOR EACH ROW EXECUTE FUNCTION notify_table_change();
 
 -- User/security tables
