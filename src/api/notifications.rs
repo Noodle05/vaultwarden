@@ -529,6 +529,143 @@ impl WebSocketUsers {
             push_auth_response(user_id, auth_request_id, device, conn).await;
         }
     }
+
+    // WS-only replay methods used by the internal notify endpoint.
+    // These skip push entirely to avoid duplicate push notifications
+    // across pods in a multi-pod HA deployment.
+
+    pub async fn replay_user_update(&self, ut: UpdateType, user: &User) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![("UserId".into(), user.uuid.to_string().into()), ("Date".into(), serialize_date(user.updated_at))],
+            ut,
+            None,
+        );
+        self.send_update(&user.uuid, &data).await;
+    }
+
+    pub async fn replay_logout(&self, user: &User) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![("UserId".into(), user.uuid.to_string().into()), ("Date".into(), serialize_date(user.updated_at))],
+            UpdateType::LogOut,
+            None,
+        );
+        self.send_update(&user.uuid, &data).await;
+    }
+
+    pub async fn replay_folder_update(&self, ut: UpdateType, folder: &Folder) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![
+                ("Id".into(), folder.uuid.to_string().into()),
+                ("UserId".into(), folder.user_uuid.to_string().into()),
+                ("RevisionDate".into(), serialize_date(folder.updated_at)),
+            ],
+            ut,
+            None,
+        );
+        self.send_update(&folder.user_uuid, &data).await;
+    }
+
+    pub async fn replay_cipher_update(&self, ut: UpdateType, cipher: &Cipher, user_ids: &[UserId]) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let org_id = convert_option(cipher.organization_uuid.as_deref());
+        let (user_id, revision_date) = if cipher.user_uuid.is_some() {
+            (convert_option(cipher.user_uuid.as_deref()), serialize_date(cipher.updated_at))
+        } else {
+            (Value::Nil, serialize_date(Utc::now().naive_utc()))
+        };
+
+        let data = create_update(
+            vec![
+                ("Id".into(), cipher.uuid.to_string().into()),
+                ("UserId".into(), user_id),
+                ("OrganizationId".into(), org_id),
+                ("CollectionIds".into(), Value::Nil),
+                ("RevisionDate".into(), revision_date),
+            ],
+            ut,
+            None,
+        );
+
+        for uuid in user_ids {
+            self.send_update(uuid, &data).await;
+        }
+    }
+
+    pub async fn replay_send_update(&self, ut: UpdateType, send: &DbSend, user_ids: &[UserId]) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let user_id = convert_option(send.user_uuid.as_deref());
+        let data = create_update(
+            vec![
+                ("Id".into(), send.uuid.to_string().into()),
+                ("UserId".into(), user_id),
+                ("RevisionDate".into(), serialize_date(send.revision_date)),
+            ],
+            ut,
+            None,
+        );
+
+        for uuid in user_ids {
+            self.send_update(uuid, &data).await;
+        }
+    }
+
+    /// WS-only replay when the Send row is gone (hard delete).
+    /// Accepts only the fields needed for the notification payload.
+    pub async fn replay_send_delete(&self, send_uuid: &str, user_ids: &[UserId]) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![
+                ("Id".into(), send_uuid.to_owned().into()),
+                ("UserId".into(), Value::Nil),
+                ("RevisionDate".into(), serialize_date(Utc::now().naive_utc())),
+            ],
+            UpdateType::SyncSendDelete,
+            None,
+        );
+
+        for uuid in user_ids {
+            self.send_update(uuid, &data).await;
+        }
+    }
+
+    pub async fn replay_auth_request(&self, user_id: &UserId, auth_request_uuid: &str) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![("Id".into(), auth_request_uuid.to_owned().into()), ("UserId".into(), user_id.to_string().into())],
+            UpdateType::AuthRequest,
+            None,
+        );
+        self.send_update(user_id, &data).await;
+    }
+
+    pub async fn replay_auth_response(&self, user_id: &UserId, auth_request_id: &AuthRequestId) {
+        if !CONFIG.enable_websocket() {
+            return;
+        }
+        let data = create_update(
+            vec![("Id".into(), auth_request_id.to_string().into()), ("UserId".into(), user_id.to_string().into())],
+            UpdateType::AuthRequestResponse,
+            None,
+        );
+        self.send_update(user_id, &data).await;
+    }
 }
 
 #[derive(Clone)]

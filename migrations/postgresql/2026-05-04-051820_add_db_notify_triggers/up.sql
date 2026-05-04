@@ -80,13 +80,18 @@ BEGIN
                         'status', to_jsonb(OLD)->>'status',
                         'user_uuid', to_jsonb(OLD)->>'user_uuid'
                     )
+                    WHEN 'folders' THEN jsonb_build_object(
+                        'user_uuid', to_jsonb(OLD)->>'user_uuid'
+                    )
                     ELSE '{}'::jsonb
                 END
             ELSE '{}'::jsonb
         END,
         'new', CASE
-            WHEN TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'users_organizations' THEN
+            WHEN TG_OP IN ('INSERT', 'UPDATE') AND TG_TABLE_NAME = 'users_organizations' THEN
                 jsonb_build_object('status', to_jsonb(NEW)->>'status')
+            WHEN TG_OP IN ('INSERT', 'UPDATE') AND TG_TABLE_NAME = 'folders' THEN
+                jsonb_build_object('user_uuid', to_jsonb(NEW)->>'user_uuid')
             ELSE '{}'::jsonb
         END
     )::text);
