@@ -174,7 +174,7 @@ fn minimal_cipher(uuid: CipherId, user_uuid: Option<UserId>, org_uuid: Option<Or
         user_uuid,
         organization_uuid: org_uuid,
         key: None,
-        atype: 1,
+        atype: 1, // arbitrary; only uuid, user_uuid, org_uuid, updated_at are used by the replay payload
         name: String::new(),
         notes: None,
         fields: None,
@@ -294,6 +294,8 @@ async fn handle_user(
         "security_stamp",
         "client_kdf_type",
         "client_kdf_iter",
+        "client_kdf_memory",
+        "client_kdf_parallelism",
         "email",
         "api_key",
         "enabled",
