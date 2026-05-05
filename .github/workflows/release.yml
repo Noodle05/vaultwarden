@@ -37,7 +37,7 @@ defaults:
 jobs:
   docker-build:
     name: Build Vaultwarden containers
-    if: ${{ github.repository == 'dani-garcia/vaultwarden' }}
+    if: ${{ github.repository == 'Noodle05/vaultwarden' }}
     environment: 
       name: release
       deployment: false
