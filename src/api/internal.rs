@@ -73,11 +73,7 @@ async fn post_notify(
     }
 }
 
-async fn dispatch(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn dispatch(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     match p.table.as_str() {
         "ciphers" => handle_cipher(p, conn, ws_users).await,
         "attachments" | "ciphers_collections" | "folders_ciphers" | "archives" => {
@@ -122,11 +118,7 @@ fn user_id(s: &str) -> UserId {
 
 // ── ciphers ────────────────────────────────────────────────
 
-async fn handle_cipher(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_cipher(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     let ut = match p.operation.as_str() {
         "insert" => UpdateType::SyncCipherCreate,
         "delete" => UpdateType::SyncLoginDelete,
@@ -187,11 +179,7 @@ fn minimal_cipher(uuid: CipherId, user_uuid: Option<UserId>, org_uuid: Option<Or
 
 // ── child tables (attachments, ciphers_collections, folders_ciphers, archives) ──
 
-async fn handle_child_cipher(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_child_cipher(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     let cid = cipher_id(&p.id);
 
     if let Some(cipher) = Cipher::find_by_uuid(&cid, conn).await {
@@ -203,9 +191,7 @@ async fn handle_child_cipher(
         // Cipher may have been deleted first (CASCADE). Fall back to old payload.
         if let Some(uid) = json_str(&p.old, "user_uuid") {
             let cipher = minimal_cipher(cid, Some(user_id(uid)), None);
-            ws_users
-                .replay_cipher_update(UpdateType::SyncCipherUpdate, &cipher, &[user_id(uid)])
-                .await;
+            ws_users.replay_cipher_update(UpdateType::SyncCipherUpdate, &cipher, &[user_id(uid)]).await;
         }
     }
     Ok(())
@@ -221,8 +207,7 @@ async fn handle_folder(p: &NotifyPayload, ws_users: &WebSocketUsers) -> Result<(
     };
 
     // Resolve user_uuid: DELETE uses old, INSERT/UPDATE uses new
-    let uid = json_str(&p.old, "user_uuid")
-        .or_else(|| json_str(&p.new, "user_uuid"));
+    let uid = json_str(&p.old, "user_uuid").or_else(|| json_str(&p.new, "user_uuid"));
 
     let Some(uid) = uid else {
         return Ok(());
@@ -242,11 +227,7 @@ async fn handle_folder(p: &NotifyPayload, ws_users: &WebSocketUsers) -> Result<(
 
 // ── sends ──────────────────────────────────────────────────
 
-async fn handle_send(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_send(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     let ut = match p.operation.as_str() {
         "insert" => UpdateType::SyncSendCreate,
         "delete" => UpdateType::SyncSendDelete,
@@ -276,11 +257,7 @@ async fn handle_send(
 
 // ── users ──────────────────────────────────────────────────
 
-async fn handle_user(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_user(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     if p.changed_columns.is_empty() {
         return Ok(());
     }
@@ -312,11 +289,7 @@ async fn handle_user(
 
 // ── auth_requests ──────────────────────────────────────────
 
-async fn handle_auth_request(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_auth_request(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     if p.operation == "delete" {
         return Ok(());
     }
@@ -331,9 +304,7 @@ async fn handle_auth_request(
         }
         "update" if auth.approved.is_some() => {
             ws_users.replay_auth_response(&auth.user_uuid, &auth.uuid).await;
-            WS_ANONYMOUS_SUBSCRIPTIONS
-                .send_auth_response(&auth.user_uuid, &auth.uuid)
-                .await;
+            WS_ANONYMOUS_SUBSCRIPTIONS.send_auth_response(&auth.user_uuid, &auth.uuid).await;
         }
         _ => {}
     }
@@ -343,11 +314,7 @@ async fn handle_auth_request(
 
 // ── users_organizations ────────────────────────────────────
 
-async fn handle_users_org(
-    p: &NotifyPayload,
-    conn: &DbConn,
-    ws_users: &WebSocketUsers,
-) -> Result<(), &'static str> {
+async fn handle_users_org(p: &NotifyPayload, conn: &DbConn, ws_users: &WebSocketUsers) -> Result<(), &'static str> {
     let new_status = json_str(&p.new, "status");
     let old_status = json_str(&p.old, "status");
     let uid = json_str(&p.old, "user_uuid");
