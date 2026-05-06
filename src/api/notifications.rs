@@ -338,8 +338,15 @@ impl WebSocketUsers {
     }
 
     // NOTE: The last modified date needs to be updated before calling these methods
-    pub async fn send_user_update(&self, ut: UpdateType, user: &User, push_uuid: Option<&PushId>, conn: &DbConn) {
-        // Skip any processing if both WebSockets and Push are not active
+
+    async fn notify_user_update(
+        &self,
+        ut: UpdateType,
+        user: &User,
+        push_uuid: Option<&PushId>,
+        conn: Option<&DbConn>,
+        push: bool,
+    ) {
         if *NOTIFICATIONS_DISABLED {
             return;
         }
@@ -353,13 +360,20 @@ impl WebSocketUsers {
             self.send_update(&user.uuid, &data).await;
         }
 
-        if CONFIG.push_enabled() {
-            push_user_update(ut, user, push_uuid, conn).await;
+        if push {
+            if let Some(conn) = conn {
+                if CONFIG.push_enabled() {
+                    push_user_update(ut, user, push_uuid, conn).await;
+                }
+            }
         }
     }
 
-    pub async fn send_logout(&self, user: &User, acting_device: Option<&Device>, conn: &DbConn) {
-        // Skip any processing if both WebSockets and Push are not active
+    pub async fn send_user_update(&self, ut: UpdateType, user: &User, push_uuid: Option<&PushId>, conn: &DbConn) {
+        self.notify_user_update(ut, user, push_uuid, Some(conn), true).await;
+    }
+
+    async fn notify_logout(&self, user: &User, acting_device: Option<&Device>, conn: Option<&DbConn>, push: bool) {
         if *NOTIFICATIONS_DISABLED {
             return;
         }
@@ -374,13 +388,27 @@ impl WebSocketUsers {
             self.send_update(&user.uuid, &data).await;
         }
 
-        if CONFIG.push_enabled() {
-            push_logout(user, acting_device, conn).await;
+        if push {
+            if let Some(conn) = conn {
+                if CONFIG.push_enabled() {
+                    push_logout(user, acting_device, conn).await;
+                }
+            }
         }
     }
 
-    pub async fn send_folder_update(&self, ut: UpdateType, folder: &Folder, device: &Device, conn: &DbConn) {
-        // Skip any processing if both WebSockets and Push are not active
+    pub async fn send_logout(&self, user: &User, acting_device: Option<&Device>, conn: &DbConn) {
+        self.notify_logout(user, acting_device, Some(conn), true).await;
+    }
+
+    async fn notify_folder_update(
+        &self,
+        ut: UpdateType,
+        folder: &Folder,
+        device: Option<&Device>,
+        conn: Option<&DbConn>,
+        push: bool,
+    ) {
         if *NOTIFICATIONS_DISABLED {
             return;
         }
@@ -391,28 +419,37 @@ impl WebSocketUsers {
                 ("RevisionDate".into(), serialize_date(folder.updated_at)),
             ],
             ut,
-            Some(device.uuid.clone()),
+            device.map(|d| d.uuid.clone()),
         );
 
         if CONFIG.enable_websocket() {
             self.send_update(&folder.user_uuid, &data).await;
         }
 
-        if CONFIG.push_enabled() {
-            push_folder_update(ut, folder, device, conn).await;
+        if push {
+            if let (Some(device), Some(conn)) = (device, conn) {
+                if CONFIG.push_enabled() {
+                    push_folder_update(ut, folder, device, conn).await;
+                }
+            }
         }
     }
 
-    pub async fn send_cipher_update(
+    pub async fn send_folder_update(&self, ut: UpdateType, folder: &Folder, device: &Device, conn: &DbConn) {
+        self.notify_folder_update(ut, folder, Some(device), Some(conn), true).await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn notify_cipher_update(
         &self,
         ut: UpdateType,
         cipher: &Cipher,
         user_ids: &[UserId],
-        device: &Device,
         collection_uuids: Option<Vec<CollectionId>>,
-        conn: &DbConn,
+        device: Option<&Device>,
+        conn: Option<&DbConn>,
+        push: bool,
     ) {
-        // Skip any processing if both WebSockets and Push are not active
         if *NOTIFICATIONS_DISABLED {
             return;
         }
@@ -438,7 +475,7 @@ impl WebSocketUsers {
                 ("RevisionDate".into(), revision_date),
             ],
             ut,
-            Some(device.uuid.clone()), // Acting device id (unique device/app uuid)
+            device.map(|d| d.uuid.clone()),
         );
 
         if CONFIG.enable_websocket() {
@@ -447,8 +484,63 @@ impl WebSocketUsers {
             }
         }
 
-        if CONFIG.push_enabled() && user_ids.len() == 1 {
-            push_cipher_update(ut, cipher, device, conn).await;
+        if push {
+            if let (Some(device), Some(conn)) = (device, conn) {
+                if CONFIG.push_enabled() && user_ids.len() == 1 {
+                    push_cipher_update(ut, cipher, device, conn).await;
+                }
+            }
+        }
+    }
+
+    pub async fn send_cipher_update(
+        &self,
+        ut: UpdateType,
+        cipher: &Cipher,
+        user_ids: &[UserId],
+        device: &Device,
+        collection_uuids: Option<Vec<CollectionId>>,
+        conn: &DbConn,
+    ) {
+        self.notify_cipher_update(ut, cipher, user_ids, collection_uuids, Some(device), Some(conn), true).await;
+    }
+
+    async fn notify_send_update(
+        &self,
+        ut: UpdateType,
+        send: &DbSend,
+        user_ids: &[UserId],
+        device: Option<&Device>,
+        conn: Option<&DbConn>,
+        push: bool,
+    ) {
+        if *NOTIFICATIONS_DISABLED {
+            return;
+        }
+        let user_id = convert_option(send.user_uuid.as_deref());
+
+        let data = create_update(
+            vec![
+                ("Id".into(), send.uuid.to_string().into()),
+                ("UserId".into(), user_id),
+                ("RevisionDate".into(), serialize_date(send.revision_date)),
+            ],
+            ut,
+            None,
+        );
+
+        if CONFIG.enable_websocket() {
+            for uuid in user_ids {
+                self.send_update(uuid, &data).await;
+            }
+        }
+
+        if push {
+            if let (Some(device), Some(conn)) = (device, conn) {
+                if CONFIG.push_enabled() && user_ids.len() == 1 {
+                    push_send_update(ut, send, device, conn).await;
+                }
+            }
         }
     }
 
@@ -460,48 +552,68 @@ impl WebSocketUsers {
         device: &Device,
         conn: &DbConn,
     ) {
-        // Skip any processing if both WebSockets and Push are not active
-        if *NOTIFICATIONS_DISABLED {
-            return;
-        }
-        let user_id = convert_option(send.user_uuid.as_deref());
-
-        let data = create_update(
-            vec![
-                ("Id".into(), send.uuid.to_string().into()),
-                ("UserId".into(), user_id),
-                ("RevisionDate".into(), serialize_date(send.revision_date)),
-            ],
-            ut,
-            None,
-        );
-
-        if CONFIG.enable_websocket() {
-            for uuid in user_ids {
-                self.send_update(uuid, &data).await;
-            }
-        }
-        if CONFIG.push_enabled() && user_ids.len() == 1 {
-            push_send_update(ut, send, device, conn).await;
-        }
+        self.notify_send_update(ut, send, user_ids, Some(device), Some(conn), true).await;
     }
 
-    pub async fn send_auth_request(&self, user_id: &UserId, auth_request_uuid: &str, device: &Device, conn: &DbConn) {
-        // Skip any processing if both WebSockets and Push are not active
+    async fn notify_auth_request(
+        &self,
+        user_id: &UserId,
+        auth_request_uuid: &str,
+        device: Option<&Device>,
+        conn: Option<&DbConn>,
+        push: bool,
+    ) {
         if *NOTIFICATIONS_DISABLED {
             return;
         }
         let data = create_update(
             vec![("Id".into(), auth_request_uuid.to_owned().into()), ("UserId".into(), user_id.to_string().into())],
             UpdateType::AuthRequest,
-            Some(device.uuid.clone()),
+            device.map(|d| d.uuid.clone()),
         );
         if CONFIG.enable_websocket() {
             self.send_update(user_id, &data).await;
         }
 
-        if CONFIG.push_enabled() {
-            push_auth_request(user_id, auth_request_uuid, device, conn).await;
+        if push {
+            if let (Some(device), Some(conn)) = (device, conn) {
+                if CONFIG.push_enabled() {
+                    push_auth_request(user_id, auth_request_uuid, device, conn).await;
+                }
+            }
+        }
+    }
+
+    pub async fn send_auth_request(&self, user_id: &UserId, auth_request_uuid: &str, device: &Device, conn: &DbConn) {
+        self.notify_auth_request(user_id, auth_request_uuid, Some(device), Some(conn), true).await;
+    }
+
+    async fn notify_auth_response(
+        &self,
+        user_id: &UserId,
+        auth_request_id: &AuthRequestId,
+        device: Option<&Device>,
+        conn: Option<&DbConn>,
+        push: bool,
+    ) {
+        if *NOTIFICATIONS_DISABLED {
+            return;
+        }
+        let data = create_update(
+            vec![("Id".into(), auth_request_id.to_string().into()), ("UserId".into(), user_id.to_string().into())],
+            UpdateType::AuthRequestResponse,
+            device.map(|d| d.uuid.clone()),
+        );
+        if CONFIG.enable_websocket() {
+            self.send_update(user_id, &data).await;
+        }
+
+        if push {
+            if let (Some(device), Some(conn)) = (device, conn) {
+                if CONFIG.push_enabled() {
+                    push_auth_response(user_id, auth_request_id, device, conn).await;
+                }
+            }
         }
     }
 
@@ -512,114 +624,31 @@ impl WebSocketUsers {
         device: &Device,
         conn: &DbConn,
     ) {
-        // Skip any processing if both WebSockets and Push are not active
-        if *NOTIFICATIONS_DISABLED {
-            return;
-        }
-        let data = create_update(
-            vec![("Id".into(), auth_request_id.to_string().into()), ("UserId".into(), user_id.to_string().into())],
-            UpdateType::AuthRequestResponse,
-            Some(device.uuid.clone()),
-        );
-        if CONFIG.enable_websocket() {
-            self.send_update(user_id, &data).await;
-        }
-
-        if CONFIG.push_enabled() {
-            push_auth_response(user_id, auth_request_id, device, conn).await;
-        }
+        self.notify_auth_response(user_id, auth_request_id, Some(device), Some(conn), true).await;
     }
 
     // WS-only replay methods used by the internal notify endpoint.
-    // These skip push entirely to avoid duplicate push notifications
-    // across pods in a multi-pod HA deployment.
+    // These delegate to notify_* with push=false to avoid duplicate push
+    // notifications across pods in a multi-pod HA deployment.
 
     pub async fn replay_user_update(&self, ut: UpdateType, user: &User) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let data = create_update(
-            vec![("UserId".into(), user.uuid.to_string().into()), ("Date".into(), serialize_date(user.updated_at))],
-            ut,
-            None,
-        );
-        self.send_update(&user.uuid, &data).await;
+        self.notify_user_update(ut, user, None, None, false).await;
     }
 
     pub async fn replay_logout(&self, user: &User) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let data = create_update(
-            vec![("UserId".into(), user.uuid.to_string().into()), ("Date".into(), serialize_date(user.updated_at))],
-            UpdateType::LogOut,
-            None,
-        );
-        self.send_update(&user.uuid, &data).await;
+        self.notify_logout(user, None, None, false).await;
     }
 
     pub async fn replay_folder_update(&self, ut: UpdateType, folder: &Folder) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let data = create_update(
-            vec![
-                ("Id".into(), folder.uuid.to_string().into()),
-                ("UserId".into(), folder.user_uuid.to_string().into()),
-                ("RevisionDate".into(), serialize_date(folder.updated_at)),
-            ],
-            ut,
-            None,
-        );
-        self.send_update(&folder.user_uuid, &data).await;
+        self.notify_folder_update(ut, folder, None, None, false).await;
     }
 
     pub async fn replay_cipher_update(&self, ut: UpdateType, cipher: &Cipher, user_ids: &[UserId]) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let org_id = convert_option(cipher.organization_uuid.as_deref());
-        let (user_id, revision_date) = if cipher.user_uuid.is_some() {
-            (convert_option(cipher.user_uuid.as_deref()), serialize_date(cipher.updated_at))
-        } else {
-            (Value::Nil, serialize_date(Utc::now().naive_utc()))
-        };
-
-        let data = create_update(
-            vec![
-                ("Id".into(), cipher.uuid.to_string().into()),
-                ("UserId".into(), user_id),
-                ("OrganizationId".into(), org_id),
-                ("CollectionIds".into(), Value::Nil),
-                ("RevisionDate".into(), revision_date),
-            ],
-            ut,
-            None,
-        );
-
-        for uuid in user_ids {
-            self.send_update(uuid, &data).await;
-        }
+        self.notify_cipher_update(ut, cipher, user_ids, None, None, None, false).await;
     }
 
     pub async fn replay_send_update(&self, ut: UpdateType, send: &DbSend, user_ids: &[UserId]) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let user_id = convert_option(send.user_uuid.as_deref());
-        let data = create_update(
-            vec![
-                ("Id".into(), send.uuid.to_string().into()),
-                ("UserId".into(), user_id),
-                ("RevisionDate".into(), serialize_date(send.revision_date)),
-            ],
-            ut,
-            None,
-        );
-
-        for uuid in user_ids {
-            self.send_update(uuid, &data).await;
-        }
+        self.notify_send_update(ut, send, user_ids, None, None, false).await;
     }
 
     /// WS-only replay when the Send row is gone (hard delete).
@@ -644,27 +673,11 @@ impl WebSocketUsers {
     }
 
     pub async fn replay_auth_request(&self, user_id: &UserId, auth_request_uuid: &str) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let data = create_update(
-            vec![("Id".into(), auth_request_uuid.to_owned().into()), ("UserId".into(), user_id.to_string().into())],
-            UpdateType::AuthRequest,
-            None,
-        );
-        self.send_update(user_id, &data).await;
+        self.notify_auth_request(user_id, auth_request_uuid, None, None, false).await;
     }
 
     pub async fn replay_auth_response(&self, user_id: &UserId, auth_request_id: &AuthRequestId) {
-        if !CONFIG.enable_websocket() {
-            return;
-        }
-        let data = create_update(
-            vec![("Id".into(), auth_request_id.to_string().into()), ("UserId".into(), user_id.to_string().into())],
-            UpdateType::AuthRequestResponse,
-            None,
-        );
-        self.send_update(user_id, &data).await;
+        self.notify_auth_response(user_id, auth_request_id, None, None, false).await;
     }
 }
 
